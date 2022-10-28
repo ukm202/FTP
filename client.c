@@ -21,6 +21,48 @@
 bool running = true;
 int login_state = -1;
 
+// Function that creates Socket & connections for Control Channel
+int control_channel(int sPort, int cPort)
+{
+    // create a socket - Control Channel Socket
+    int cSocket;
+    cSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    // check for fail error - for control
+    if (cSocket == -1)
+    {
+        printf("Socket creation failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // setsock
+    int value = 1; // scope is closed only until next line
+    setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+
+    struct sockaddr_in sAddr, cAddr;
+    bzero(&cAddr, sizeof(cAddr));
+
+    cAddr.sin_family = AF_INET;
+    cAddr.sin_port = htons(cPort);
+    cAddr.sin_addr.s_addr = INADDR_ANY;
+
+    // connecting to server port
+    int connection_status =
+        connect(cSocket,
+                (struct sockaddr *)&cAddr,
+                sizeof(cAddr));
+
+    // check for errors with the connection
+    if (connection_status == -1)
+    {
+        printf("There was an error making a connection to the remote socket. %d %d\n\n", cPort, sPort);
+        exit(EXIT_FAILURE);
+    }
+    
+
+    return cSocket;
+}
+
 // Function that creates Socket & connections
 int createSocket(bool lstn, int sPort, int cPort)
 {
@@ -467,8 +509,9 @@ void handleCommands(char *buffer, int cSocket)
 // Main Function
 int main()
 {
-    // Creating tcp socket
-    int cSocket = createSocket(false, generatePORT(), S_CONTROLPORT);
+    // Creating tcp socket for Control Connection
+
+    int control_socket = control_channel(generatePORT(), S_CONTROLPORT);
 
     // accept command
     char buffer[BUFFER_SIZE];
@@ -482,7 +525,7 @@ int main()
         // remove trailing newline char from buffer, fgets doesn't do it
         buffer[strcspn(buffer, "\n")] = 0; // review 0 or '0'
 
-        handleCommands(buffer, cSocket);
+        handleCommands(buffer, control_socket);
         bzero(buffer, sizeof(buffer));
     }
 

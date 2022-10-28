@@ -1,3 +1,8 @@
+// use read for recv, write for send
+// names - start from small letters + _ + small letters again
+
+
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,7 +23,6 @@
 #define S_CONTROLPORT 21 // Control Channel
 #define S_DATAPORT 20    // Data Channel
 
-int createSocket(bool lstn, int sPort, int cPort);
 
 // Array to maintain session state
 int session[100];
@@ -47,30 +51,117 @@ typedef struct
 // Array that stores the login data
 login_details data[100];
 
+// function to create control channel - let's rename this variables and make this fuction together
+int control_channel(int sPort, int cPort)
+{
+    // create a socket - Control Channel Socket
+    int cSocket;
+    cSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    // check for fail error - for control
+    if (cSocket == -1)
+    {
+        printf("Socket creation failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // setsock
+    int value = 1; // scope is closed only until next line
+    setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+
+    struct sockaddr_in sAddr, cAddr;
+    bzero(&cAddr, sizeof(cAddr));
+    cAddr.sin_family = AF_INET;
+    cAddr.sin_port = htons(cPort);
+    cAddr.sin_addr.s_addr = INADDR_ANY;
+
+    // connecting to server port
+    int connection_status =
+        connect(cSocket,
+                (struct sockaddr *)&cAddr,
+                sizeof(cAddr));
+
+    // check for errors with the connection
+    if (connection_status == -1)
+    {
+        printf("There was an error making a connection to the remote socket. %d %d\n\n", cPort, sPort);
+        exit(EXIT_FAILURE);
+    }
+    
+}
+
+// Function that creates data channel
+int data_channel(int sPort, int cPort)
+{
+    // create a socket - Control Channel Socket
+    int cSocket;
+    cSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    // check for fail error - for control
+    if (cSocket == -1)
+    {
+        printf("Socket creation failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // setsock
+    int value = 1; // scope is closed only until next line
+    setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+
+    struct sockaddr_in sAddr, cAddr;
+    bzero(&sAddr, sizeof(sAddr));
+
+    sAddr.sin_family = AF_INET;
+    sAddr.sin_port = htons(sPort);
+    sAddr.sin_addr.s_addr = INADDR_ANY;
+
+
+    // bind the socket to our specified IP and port
+    if (bind(cSocket, (struct sockaddr *)&sAddr, sizeof(sAddr)) < 0)
+    {
+        printf("Socket bind failed. %d %d\n", cPort, sPort);
+        exit(EXIT_FAILURE);
+    }
+    // after it is bound, we can listen for connections with queue length of 5
+    if (listen(cSocket, 5) < 0)
+    {
+        printf("Listen failed.\n");
+        close(cSocket);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("LISTENING on PORT %d...\n", sPort);
+    
+
+    return cSocket;
+}
+
+
+
 // load function which reads the user file from the directory and loads data into the array
-int load(char *filename)
+int read_users_file(char *users_filename)
 {
     char buffer[200];
     char token[50];
     login_details *log;
-    FILE *file = fopen(filename, "r");
-    int size = 0;
-    char delim[] = ",";
-    int x = 2;
-    int k = 0;
-    int i;
-    char format_str[50] = "\0";
-    while (fgets(buffer, 200, file) != NULL)
+    FILE *f = fopen(users_filename, "r");
+    int arr_size = 0;
+    char delimitter[] = ",";
+    int i, j, k;
+    j = 2;
+    k = 0;
+    char string_format[50] = "\0";
+    while (fgets(buffer, 200, f) != NULL)
     {
         log = (login_details *)malloc(sizeof(login_details));
-        char *ptr = strtok(buffer, delim);
+        char *ptr = strtok(buffer, delimitter);
         while (ptr != NULL)
         {
-            if (x % 2 == 0)
+            if (j % 2 == 0)
             {
                 log->user = strdup(ptr);
             }
-            else if (x % 2 == 1)
+            else if (j % 2 == 1)
             {
                 for (i = 0; i < strlen(ptr); i++)
                 {
@@ -78,30 +169,32 @@ int load(char *filename)
                     if (k > 31 && k < 127)
                     {
                         char c = k;
-                        strcat(format_str, &c);
+                        strcat(string_format, &c);
                     }
-                    format_str[i + 1] = '\0';
+                    string_format[i + 1] = '\0';
                 }
-                format_str[i] = '\0';
-                log->pass = strdup(format_str);
-                bzero(format_str, sizeof(format_str));
+                string_format[i] = '\0';
+                log->pass = strdup(string_format);
+                bzero(string_format, sizeof(string_format));
             }
-            ptr = strtok(NULL, delim);
-            x++;
+            ptr = strtok(NULL, delimitter);
+            j++;
         }
-        data[size] = *log;
-        size++;
+        data[arr_size] = *log;
+        arr_size++;
     }
-    fclose(file);
-    return size;
+    fclose(f);
+    return arr_size;
 }
 //-------------------------------------------------------------------------------------------------------
 
 // function that returns appropriate response messages
-char *responseMsg(int statusCode)
+char *ret_response(int status_code)
 {
     char *response;
-    switch (statusCode)
+    // char STATUS_CODES[8][4] = {530, 331, 230, 503, 202, 550, 200, 150, 226}; // creating doesn't look suitable
+
+    switch (status_code)
     {
     case 530:
     {
@@ -180,7 +273,8 @@ char *responseMsg(int statusCode)
 }
 
 // Bool Function that checks if User is logged in
-bool userAuth(int client, char *command)
+// do we need this second parameter command?
+bool autheticate_user(int client, char *command)
 {
     if ((session[client] == -1 || session[client] == 0))
     {
@@ -190,39 +284,39 @@ bool userAuth(int client, char *command)
     return true;
 }
 
-int parsePort(char *msg)
+int parse_port(char *text)
 {
     int count = 0;
-    for (; *msg != '\0'; msg++)
+    for (; *text != '\0'; text++)
     {
-        if (*msg == ',')
+        if (*text == ',')
         {
             count++;
             if (count == 4)
             {
-                msg++;
+                text++;
                 break;
             }
         }
     }
 
-    char *token = strtok(msg, ",");
+    char *token = strtok(text, ",");
     int p1 = atoi(token);
     token = strtok(NULL, ",");
     int p2 = atoi(token);
     return p1 * 256 + p2;
 }
 
-void performPORT(int client, char *buffer)
+void port_cmd(int client, char *buffer)
 {
     char *msg = buffer + 5;
-    int port = parsePort(msg);
+    int port = parse_port(msg);
     sess[client].currentDataPort = port;
-    send(client, responseMsg(200), BUFFER_SIZE, 0);
+    send(client, ret_response(200), BUFFER_SIZE, 0);
 }
 
 // Function that returns server directory
-void performPWD(int client, bool cwd_flag)
+void pwd_cmd(int client, bool cwd_flag)
 {
     char *cwd;
     chdir(sess[client].dir);
@@ -242,49 +336,49 @@ void performPWD(int client, bool cwd_flag)
     }
     else
     {
-        send(client, responseMsg(550), BUFFER_SIZE, 0);
+        send(client, ret_response(550), BUFFER_SIZE, 0);
     }
 }
 
 // Function to Change Server Directory
-void performCWD(int client, char *buffer)
+void cwd_cmd(int client, char *buffer)
 {
     chdir(sess[client].dir);
     char *directory = buffer + 4;
     if (chdir(directory) != 0)
     {
-        send(client, responseMsg(550), BUFFER_SIZE, 0);
+        send(client, ret_response(550), BUFFER_SIZE, 0);
     }
     else
     {
-        char u_dir[BUFFER_SIZE];
-        getcwd(u_dir, BUFFER_SIZE);
+        char user_dir[BUFFER_SIZE];
+        getcwd(user_dir, BUFFER_SIZE);
 
         Session *s;
         s = (Session *)malloc(sizeof(Session));
-        s->dir = strdup(u_dir);
+        s->dir = strdup(user_dir);
         sess[client] = *s;
 
-        performPWD(client, true);
+        pwd_cmd(client, true);
     }
 }
 
 // Function to List files in current server directory
-void performLIST(int client)
+void list_cmd(int client)
 {
-    send(client, responseMsg(150), BUFFER_SIZE, 0);
-    int channel = createSocket(false, S_DATAPORT, sess[client].currentDataPort);
+    send(client, ret_response(150), BUFFER_SIZE, 0);
+    int channel = data_channel( S_DATAPORT, sess[client].currentDataPort);
 
     int count = 0;
     struct dirent *dir;
 
     chdir(sess[client].dir);
 
-    DIR *d;
-    d = opendir(".");
-    if (d)
+    DIR *dirr;
+    dirr = opendir(".");
+    if (dirr)
     {
-        while ((dir = readdir(d)) != NULL)
+        while ((dir = readdir(dirr)) != NULL)
         {
             if (count > 1)
             {
@@ -297,35 +391,35 @@ void performLIST(int client)
             }
             count++;
         }
-        closedir(d);
+        closedir(dirr);
     }
 
     close(channel);
 }
 
 // Function to Retrieve File from server directory
-void performRETR(int client, char *filename)
+void retr_cmd(int client, char *fn)
 {
-    send(client, responseMsg(150), BUFFER_SIZE, 0);
+    send(client, ret_response(150), BUFFER_SIZE, 0);
 
-    int channel = createSocket(false, S_DATAPORT, sess[client].currentDataPort);
+    int channel = data_channel( S_DATAPORT, sess[client].currentDataPort);
 
-    FILE *f;
-    f = fopen(filename, "rb");
+    FILE *file;
+    file = fopen(fn, "rb");
 
-    if (f == NULL)
+    if (file == NULL)
     {
-        printf("Can't open %s\n", filename);
+        printf("Can't open %s\n", fn);
     }
     else
     {
         struct stat stat_buf;
         int temp;
-        int rc = stat(filename, &stat_buf);
+        int rc = stat(fn, &stat_buf);
         int fsize = stat_buf.st_size;
 
         char databuff[fsize + 1];
-        fread(databuff, 1, sizeof(databuff), f);
+        fread(databuff, 1, sizeof(databuff), file);
         int total = 0, bytesleft = fsize, ln;
 
         while (total < fsize)
@@ -339,236 +433,171 @@ void performRETR(int client, char *filename)
             bytesleft -= ln;
         }
         bzero(databuff, sizeof(databuff));
-        fclose(f);
+        fclose(file);
     }
     close(channel);
-    send(client, responseMsg(226), BUFFER_SIZE, 0);
+    send(client, ret_response(226), BUFFER_SIZE, 0);
 }
 
 // Function to store File into server directory
-void performSTOR(int client, char *filename)
+void stor_cmd(int client, char *fn)
 {
-    send(client, responseMsg(150), BUFFER_SIZE, 0);
+    send(client, ret_response(150), BUFFER_SIZE, 0);
     usleep(1000000);
-    int channel = createSocket(false, S_DATAPORT, sess[client].currentDataPort);
+    int channel = data_channel( S_DATAPORT, sess[client].currentDataPort);
 
     char reader[BUFFER_SIZE];
     bzero(reader, BUFFER_SIZE);
 
-    FILE *f;
-    f = fopen(filename, "wb");
+    FILE *file;
+    file = fopen(fn, "wb");
 
     int total = 0, ln;
 
     while ((ln = read(channel, reader, BUFFER_SIZE)) > 0)
     {
-        fwrite(reader, 1, BUFFER_SIZE, f);
+        fwrite(reader, 1, BUFFER_SIZE, file);
         total += ln;
         if (ln < BUFFER_SIZE)
         {
             break;
         }
     }
-    fclose(f);
+    fclose(file);
     close(channel);
-    send(client, responseMsg(226), BUFFER_SIZE, 0);
+    send(client, ret_response(226), BUFFER_SIZE, 0);
 }
 
 // Function to Check Username
-void performUSER(int client, char *buffer)
+void user_cmd(int client, char *buffer)
 {
     if (session[client] == 1 || session[client] == 0)
     {
-        send(client, responseMsg(503), BUFFER_SIZE, 0);
+        send(client, ret_response(503), BUFFER_SIZE, 0);
         return;
     }
 
-    char *username = buffer + 5;
+    char *user_name = buffer + 5;
     for (int i = 0; i < arr_size - 1; i++)
     {
-        if (strcmp(username, data[i].user) == 0)
+        if (strcmp(user_name, data[i].user) == 0)
         {
             session[client] = 0;
-            send(client, responseMsg(331), BUFFER_SIZE, 0);
+            send(client, ret_response(331), BUFFER_SIZE, 0);
             bzero(check_username, sizeof(check_username));
-            memcpy(check_username, username, strlen(username));
+            memcpy(check_username, user_name, strlen(user_name));
             break;
         }
     }
 
     if (session[client] == -1)
     {
-        send(client, responseMsg(530), BUFFER_SIZE, 0);
+        send(client, ret_response(530), BUFFER_SIZE, 0);
     }
 }
 
 // Function to Check password
-void performPASS(int client, char *buffer)
+void pass_cmd(int client, char *buffer)
 {
     if (session[client] == 1 || session[client] == -1)
     {
-        send(client, responseMsg(503), BUFFER_SIZE, 0);
+        send(client, ret_response(503), BUFFER_SIZE, 0);
         return;
     }
 
-    char *password = buffer + 5;
+    char *pass = buffer + 5;
     if (session[client] == 0)
     {
         for (int i = 0; i < arr_size - 1; i++)
         {
-            if (strcmp(password, data[i].pass) == 0 && strcmp(check_username, data[i].user) == 0)
+            if (strcmp(pass, data[i].pass) == 0 && strcmp(check_username, data[i].user) == 0)
             {
                 session[client] = 1;
-                send(client, responseMsg(230), BUFFER_SIZE, 0);
+                send(client, ret_response(230), BUFFER_SIZE, 0);
                 break;
             }
         }
         if (session[client] == 0)
         {
             session[client] = -1;
-            send(client, responseMsg(530), BUFFER_SIZE, 0);
+            send(client, ret_response(530), BUFFER_SIZE, 0);
         }
     }
 }
 
-// Function that creates socket & connections
-int createSocket(bool lstn, int sPort, int cPort)
-{
-    // create a socket - Control Channel Socket
-    int cSocket;
-    cSocket = socket(AF_INET, SOCK_STREAM, 0);
-
-    // check for fail error - for control
-    if (cSocket == -1)
-    {
-        printf("Socket creation failed.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // setsock
-    int value = 1; // scope is closed only until next line
-    setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
-
-    struct sockaddr_in sAddr, cAddr;
-    bzero(&sAddr, sizeof(sAddr));
-    bzero(&cAddr, sizeof(cAddr));
-
-    sAddr.sin_family = AF_INET;
-    sAddr.sin_port = htons(sPort);
-    sAddr.sin_addr.s_addr = INADDR_ANY;
-
-    if (!lstn)
-    {
-        cAddr.sin_family = AF_INET;
-        cAddr.sin_port = htons(cPort);
-        cAddr.sin_addr.s_addr = INADDR_ANY;
-
-        // connecting to server port
-        int connection_status =
-            connect(cSocket,
-                    (struct sockaddr *)&cAddr,
-                    sizeof(cAddr));
-
-        // check for errors with the connection
-        if (connection_status == -1)
-        {
-            printf("There was an error making a connection to the remote socket. %d %d\n\n", cPort, sPort);
-            exit(EXIT_FAILURE);
-        }
-    }
-    else
-    {
-        // bind the socket to our specified IP and port
-        if (bind(cSocket, (struct sockaddr *)&sAddr, sizeof(sAddr)) < 0)
-        {
-            printf("Socket bind failed. %d %d\n", cPort, sPort);
-            exit(EXIT_FAILURE);
-        }
-        // after it is bound, we can listen for connections with queue length of 5
-        if (listen(cSocket, 5) < 0)
-        {
-            printf("Listen failed.\n");
-            close(cSocket);
-            exit(EXIT_FAILURE);
-        }
-
-        printf("LISTENING on PORT %d...\n", sPort);
-    }
-
-    return cSocket;
-}
 
 // Function that handles client input
-void handleCommands(int client, char *buffer)
+void main_commands(int client, char *buffer)
 {
+    char all_commands[8][6] = {"USER", "PASS", "PWD", "CWD", "PORT", "LIST", "RETR", "STOR"};
     char command[5];
     strncpy(command, buffer + 0, 4);
     printf("Command: %s\n", buffer);
 
-    if (strcmp(command, "USER") == 0)
+    if (strcmp(command, all_commands[0]) == 0)
     {
-        performUSER(client, buffer);
+        user_cmd(client, buffer);
         return;
     }
-    else if (strcmp(command, "PASS") == 0)
+    else if (strcmp(command, all_commands[1]) == 0)
     {
-        performPASS(client, buffer);
+        pass_cmd(client, buffer);
         return;
     }
 
-    if (userAuth(client, command))
+    if (autheticate_user(client, command))
     {
-        if (strcmp(command, "PWD") == 0)
+        if (strcmp(command, all_commands[2]) == 0)
         {
-            performPWD(client, false);
+            pwd_cmd(client, false);
         }
-        else if (strstr(command, "CWD"))
+        else if (strstr(command, all_commands[3]))
         {
-            performCWD(client, buffer);
+            cwd_cmd(client, buffer);
         }
-        else if (strstr(command, "PORT"))
+        else if (strstr(command, all_commands[4]))
         {
-            performPORT(client, buffer);
+            port_cmd(client, buffer);
         }
-        else if (strcmp(command, "LIST") == 0)
+        else if (strcmp(command, all_commands[5]) == 0)
         {
             int pid = fork();
             if (pid == 0)
             {
-                performLIST(client);
+                list_cmd(client);
                 exit(EXIT_SUCCESS);
             }
         }
-        else if (strcmp(command, "RETR") == 0)
+        else if (strcmp(command, all_commands[6]) == 0)
         {
             int pid = fork();
             if (pid == 0)
             {
-                performRETR(client, buffer + 5);
+                retr_cmd(client, buffer + 5);
                 exit(EXIT_SUCCESS);
             }
         }
-        else if (strcmp(command, "STOR") == 0)
+        else if (strcmp(command, all_commands[7]) == 0)
         {
             int pid = fork();
             if (pid == 0)
             {
-                performSTOR(client, buffer + 5);
+                stor_cmd(client, buffer + 5);
                 exit(EXIT_SUCCESS);
             }
         }
         else
         {
-            send(client, responseMsg(202), BUFFER_SIZE, 0);
+            send(client, ret_response(202), BUFFER_SIZE, 0);
         }
     }
-    else if (strstr(command, "STOR") || strstr(command, "RETR") || strstr(command, "LIST") || strstr(command, "CWD") || strstr(command, "PWD"))
+    else if (strstr(command, all_commands[2]) || strstr(command, all_commands[3]) || strstr(command, all_commands[5]) || strstr(command, all_commands[6]) || strstr(command, all_commands[7]))
     {
-        send(client, responseMsg(530), BUFFER_SIZE, 0);
+        send(client, ret_response(530), BUFFER_SIZE, 0);
     }
     else
     {
-        send(client, responseMsg(202), BUFFER_SIZE, 0);
+        send(client, ret_response(202), BUFFER_SIZE, 0);
     }
 }
 
@@ -576,21 +605,21 @@ void handleCommands(int client, char *buffer)
 int main()
 {
 
-    char *filename = "users.txt";
-    arr_size = load(filename);
-
-    char u_dir[256];
-    getcwd(u_dir, 256);
-    Session *s;
-    for (int i = 0; i < 100; ++i)
-    {
-        session[i] = -1;
+    char *users_filename = "users.txt";
+    arr_size = read_users_file(users_filename);
+    char users_dir[256];
+    getcwd(users_dir, 256);
+    Session *s; // Not sure how to change this Session thing
+    int idx = 0;
+    while (idx < 100){
+        session[idx] = -1;
         s = (Session *)malloc(sizeof(Session));
-        s->dir = strdup(u_dir);
-        sess[i] = *s;
+        s->dir = strdup(users_dir);
+        sess[idx] = *s;
+
     }
 
-    int sSocket = createSocket(true, S_CONTROLPORT, 0);
+    int control_socket = control_channel(S_CONTROLPORT, 0); // make two different functions one control channel, data channel
 
     // DECLARE 2 fd sets (file descriptor sets : a collection of file descriptors)
     fd_set all_sockets;
@@ -600,7 +629,7 @@ int main()
     FD_ZERO(&all_sockets);
 
     // adds one socket (the current socket) to the fd set of all sockets
-    FD_SET(sSocket, &all_sockets);
+    FD_SET(control_socket, &all_sockets);
 
     while (1)
     {
@@ -616,10 +645,10 @@ int main()
             // check to see if that fd is SET
             if (FD_ISSET(fd, &ready_sockets))
             {
-                if (fd == sSocket)
+                if (fd == control_socket)
                 {
                     // accept that new connection
-                    int client_sd = accept(sSocket, 0, 0);
+                    int client_sd = accept(control_socket, 0, 0);
 
                     // add the newly accepted socket to the set of all sockets that we are watching
                     FD_SET(client_sd, &all_sockets);
@@ -631,7 +660,7 @@ int main()
                     char buffer[BUFFER_SIZE];
                     bzero(buffer, sizeof(buffer));
 
-                    int bytes = recv(fd, buffer, sizeof(buffer), 0);
+                    int bytes = read(fd, buffer, sizeof(buffer));
                     if (bytes == 0) // client has closed the connection
                     {
                         printf("connection closed from client side \n");
@@ -643,13 +672,13 @@ int main()
                     }
 
                     // when data is received
-                    handleCommands(fd, buffer);
+                    main_commands(fd, buffer);
                 }
             }
         }
     }
 
     // close
-    close(sSocket);
+    close(control_socket);
     return 0;
 }
